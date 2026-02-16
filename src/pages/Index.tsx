@@ -2,9 +2,10 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
-  Zap, Sparkles, Hash, Globe, BarChart3, Share2, ArrowRight,
-  MessageSquare, Palette, Brain
+  Sparkles, Hash, Globe, BarChart3, Share2, ArrowRight,
+  MessageSquare, Palette, Brain, Zap
 } from "lucide-react";
+import capsyncLogo from "@/assets/capsync-logo.png";
 
 const features = [
   {
@@ -189,7 +190,7 @@ const Index = () => {
             Ready to level up your content?
           </h2>
           <p className="text-muted-foreground mb-8 max-w-lg mx-auto">
-            Join thousands of creators using CapFlow to write better captions in less time.
+            Join thousands of creators using CapSync to write better captions in less time.
           </p>
           <Link to="/generate">
             <Button size="lg" className="font-display bg-gradient-to-r from-primary to-accent text-primary-foreground border-0 hover:opacity-90 px-10 h-12">
@@ -203,12 +204,10 @@ const Index = () => {
       <footer className="border-t border-border/50 py-8 px-4">
         <div className="container mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-              <Zap className="w-3 h-3 text-primary-foreground" />
-            </div>
-            <span className="font-display font-semibold text-sm text-foreground">CapFlow</span>
+            <img src={capsyncLogo} alt="CapSync logo" className="w-6 h-6 rounded object-contain" />
+            <span className="font-display font-semibold text-sm text-foreground">CapSync</span>
           </div>
-          <p className="text-xs text-muted-foreground">© 2026 CapFlow. Built for creators.</p>
+          <p className="text-xs text-muted-foreground">© 2026 CapSync. Built for creators.</p>
         </div>
       </footer>
     </div>

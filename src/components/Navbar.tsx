@@ -1,7 +1,8 @@
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ThemeToggle from "./ThemeToggle";
+import capsyncLogo from "@/assets/capsync-logo.png";
 
 const Navbar = () => {
   const location = useLocation();
@@ -16,15 +17,14 @@ const Navbar = () => {
     >
       <div className="container mx-auto flex items-center justify-between h-16 px-4">
         <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-            <Zap className="w-4 h-4 text-primary-foreground" />
-          </div>
+          <img src={capsyncLogo} alt="CapSync logo" className="w-8 h-8 rounded-lg object-contain" />
           <span className="font-display font-bold text-lg text-foreground">
-            Cap<span className="gradient-text">Flow</span>
+            Cap<span className="gradient-text">Sync</span>
           </span>
         </Link>
 
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           {isHome ? (
             <Link to="/generate">
               <Button size="sm" className="font-display bg-gradient-to-r from-primary to-accent text-primary-foreground border-0 hover:opacity-90">
