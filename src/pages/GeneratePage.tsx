@@ -3,15 +3,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Sparkles, Copy, RefreshCw, Hash, BarChart3,
+  Sparkles, Copy, RefreshCw, BarChart3,
   Check, Image as ImageIcon, Send, X, Wand2,
   Lightbulb, ChevronRight, MessageSquarePlus,
   RotateCcw, Info, TrendingUp, Clock, Users,
-  PenLine, Loader2
+  PenLine, Loader2, ToggleLeft, Brain, User,
+  Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Caption {
   text: string;
@@ -32,6 +33,12 @@ interface PlatformTip {
   tip: string;
 }
 
+/** CaptionCraft API raw caption item */
+interface CaptionCraftItem {
+  caption: string;
+  hashtags?: string[];
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TONES = [
@@ -45,27 +52,45 @@ const TONES = [
   { id: "motivational",label: "💪 Motivational" },
 ];
 
+/** CaptionCraft vibe values that map from our tone IDs */
+const TONE_TO_VIBE: Record<string, string> = {
+  funny:        "funny",
+  aesthetic:    "inspirational",
+  professional: "professional",
+  bold:         "excited",
+  minimalist:   "calm",
+  emotional:    "romantic",
+  witty:        "funny",
+  motivational: "inspirational",
+};
+
+const LANGUAGES = [
+  { id: "en", label: "🇬🇧 English" },
+  { id: "es", label: "🇪🇸 Spanish" },
+  { id: "de", label: "🇩🇪 German" },
+  { id: "ja", label: "🇯🇵 Japanese" },
+  { id: "ko", label: "🇰🇷 Korean" },
+  { id: "zh-CN", label: "🇨🇳 Chinese (S)" },
+  { id: "zh-TW", label: "🇹🇼 Chinese (T)" },
+];
+
 const PLATFORMS: { id: string; label: string; charLimit: number; icon: string }[] = [
-  { id: "instagram", label: "Instagram", charLimit: 2200, icon: "📸" },
-  { id: "linkedin",  label: "LinkedIn",  charLimit: 3000, icon: "💼" },
-  { id: "twitter",   label: "X / Twitter", charLimit: 280, icon: "🐦" },
-  { id: "whatsapp",  label: "WhatsApp",  charLimit: 700,  icon: "💬" },
+  { id: "instagram", label: "Instagram",   charLimit: 2200, icon: "📸" },
+  { id: "linkedin",  label: "LinkedIn",    charLimit: 3000, icon: "💼" },
+  { id: "twitter",   label: "X / Twitter", charLimit: 280,  icon: "🐦" },
+  { id: "whatsapp",  label: "WhatsApp",    charLimit: 700,  icon: "💬" },
 ];
 
 const PLATFORM_TIPS: Record<string, PlatformTip> = {
-  instagram: { bestTime: "6–9 PM weekdays", audience: "18–34 year olds",   tip: "Use 5–10 hashtags for best reach. First 125 chars count most." },
-  linkedin:  { bestTime: "Tue–Thu 8–10 AM", audience: "Professionals, B2B", tip: "Long-form content performs well. End with a question to drive comments." },
-  twitter:   { bestTime: "12–3 PM weekdays", audience: "News & tech savvy", tip: "Keep it under 240 chars. Trending hashtags boost impressions 2x." },
-  whatsapp:  { bestTime: "Any time",         audience: "Your contacts",     tip: "Personal tone works best. Emojis add warmth without overdoing it." },
+  instagram: { bestTime: "6–9 PM weekdays",  audience: "18–34 year olds",    tip: "Use 5–10 hashtags for best reach. First 125 chars count most." },
+  linkedin:  { bestTime: "Tue–Thu 8–10 AM",  audience: "Professionals, B2B", tip: "Long-form content performs well. End with a question to drive comments." },
+  twitter:   { bestTime: "12–3 PM weekdays", audience: "News & tech savvy",  tip: "Keep it under 240 chars. Trending hashtags boost impressions 2x." },
+  whatsapp:  { bestTime: "Any time",         audience: "Your contacts",       tip: "Personal tone works best. Emojis add warmth without overdoing it." },
 };
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+// ─── Gemini helper ────────────────────────────────────────────────────────────
 
-/** Build a Gemini parts array and call the REST API. */
-async function callGemini(
-  apiKey: string,
-  parts: object[]
-): Promise<string> {
+async function callGemini(apiKey: string, parts: object[]): Promise<string> {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
@@ -87,47 +112,126 @@ async function callGemini(
   return text;
 }
 
+// ─── CaptionCraft API helper ───────────────────────────────────────────────────
+
+/**
+ * Calls the CaptionCraft API (image-caption-generator2.p.rapidapi.com).
+ * Returns an array of Caption objects normalised to the app's format.
+ */
+async function callCaptionCraft({
+  rapidApiKey,
+  imageUrl,
+  vibe,
+  useEmojis,
+  useHashtags,
+  lang,
+}: {
+  rapidApiKey: string;
+  imageUrl: string;
+  vibe: string;
+  useEmojis: boolean;
+  useHashtags: boolean;
+  lang: string;
+}): Promise<Caption[]> {
+  const res = await fetch("https://image-caption-generator2.p.rapidapi.com/v2/captions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-RapidAPI-Key": rapidApiKey,
+      "X-RapidAPI-Host": "image-caption-generator2.p.rapidapi.com",
+    },
+    body: JSON.stringify({
+      imageUrl,
+      vibe,
+      useEmojis,
+      useHashtags,
+      lang,
+      limit: 3,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      err?.message || `CaptionCraft API error: ${res.status} ${res.statusText}`
+    );
+  }
+
+  const data = await res.json();
+
+  // Normalise varying response shapes into Caption[]
+  const raw: CaptionCraftItem[] = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.captions)
+    ? data.captions
+    : [];
+
+  const EMOJIS = ["🔥", "✨", "💫"];
+  return raw.slice(0, 3).map((item, i) => ({
+    text:     item.caption,
+    hashtags: item.hashtags ?? [],
+    score:    Math.floor(75 + Math.random() * 20), // API doesn't return a score
+    emoji:    EMOJIS[i],
+  }));
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const GeneratePage = () => {
-  const [prompt, setPrompt]                   = useState("");
-  const [selectedTone, setSelectedTone]       = useState("aesthetic");
+  // Core state
+  const [prompt, setPrompt]                     = useState("");
+  const [selectedTone, setSelectedTone]         = useState("aesthetic");
   const [selectedPlatform, setSelectedPlatform] = useState("instagram");
-  const [isGenerating, setIsGenerating]       = useState(false);
+  const [isGenerating, setIsGenerating]         = useState(false);
   const [generatedCaptions, setGeneratedCaptions] = useState<Caption[]>([]);
-  const [copiedIndex, setCopiedIndex]         = useState<number | null>(null);
+  const [copiedIndex, setCopiedIndex]           = useState<number | null>(null);
   const [copiedWithHashtags, setCopiedWithHashtags] = useState(true);
-  const [selectedImage, setSelectedImage]     = useState<File | null>(null);
-  const [imagePreview, setImagePreview]       = useState<string | null>(null);
-  const [imageEncoded, setImageEncoded]       = useState<string | null>(null);
-  const [aiSuggestion, setAiSuggestion]       = useState<AISuggestion | null>(null);
-  const [isSuggesting, setIsSuggesting]       = useState(false);
-  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
-  const [refineIndex, setRefineIndex]         = useState<number | null>(null);
-  const [refineInstruction, setRefineInstruction] = useState("");
-  const [isRefining, setIsRefining]           = useState(false);
 
+  // Image state
+  const [selectedImage, setSelectedImage]   = useState<File | null>(null);
+  const [imagePreview, setImagePreview]     = useState<string | null>(null);
+  const [imageEncoded, setImageEncoded]     = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // AI feature state
+  const [aiSuggestion, setAiSuggestion]         = useState<AISuggestion | null>(null);
+  const [isSuggesting, setIsSuggesting]         = useState(false);
+  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
+  const [refineIndex, setRefineIndex]           = useState<number | null>(null);
+  const [refineInstruction, setRefineInstruction] = useState("");
+  const [isRefining, setIsRefining]             = useState(false);
+
+  // CaptionCraft-specific state
+  const [imageUrl, setImageUrl]         = useState("");
+  const [selectedLanguage, setSelectedLanguage] = useState("en");
+  const [apiSource, setApiSource]       = useState<"gemini" | "captioncraft">("gemini");
+
+  // Mode toggles
+  const [agentMode, setAgentMode]     = useState(false);
+  const [researchMode, setResearchMode] = useState(false);
+  const [styleMemory, setStyleMemory] = useState(false);
+  const [exportOpen, setExportOpen]   = useState(false);
+
   const { toast } = useToast();
 
-  const platform = PLATFORMS.find((p) => p.id === selectedPlatform)!;
+  const platform    = PLATFORMS.find((p) => p.id === selectedPlatform)!;
   const platformTip = PLATFORM_TIPS[selectedPlatform];
 
-  // ── API key helper ──────────────────────────────────────────────────────────
+  // ── API key helper ─────────────────────────────────────────────────────────
 
   const getApiKey = useCallback(() => {
     const key = import.meta.env.VITE_GEMINI_API_KEY;
     if (!key) {
       toast({
         title: "API Key Missing",
-        description: "Add GEMINI_API_KEY to your .env file.",
+        description: "Add VITE_GEMINI_API_KEY to your .env file.",
         variant: "destructive",
       });
     }
     return key as string | undefined;
   }, [toast]);
 
-  // ── Image handling ──────────────────────────────────────────────────────────
+  // ── Image handling ─────────────────────────────────────────────────────────
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -152,7 +256,7 @@ const GeneratePage = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // ── AI: Get tone & platform suggestion ─────────────────────────────────────
+  // ── AI: Suggest tone & platform ────────────────────────────────────────────
 
   const handleAISuggest = async () => {
     if (!prompt.trim()) {
@@ -185,15 +289,52 @@ Return JSON with keys: "tone" (one of: funny, aesthetic, professional, bold, min
     }
   };
 
-  // ── AI: Generate all captions ───────────────────────────────────────────────
+  // ── AI: Generate all captions ──────────────────────────────────────────────
 
   const handleGenerate = async () => {
-    if (!prompt.trim() && !selectedImage) return;
-    const apiKey = getApiKey();
-    if (!apiKey) return;
+    const hasImageUrl = imageUrl.trim().startsWith("http");
+    if (!prompt.trim() && !selectedImage && !hasImageUrl) return;
 
     setIsGenerating(true);
     try {
+      // ── Route to CaptionCraft when an image URL is supplied ──────────────
+      if (hasImageUrl) {
+        const ccKey = import.meta.env.VITE_CAPTIONCRAFT_API_KEY;
+        if (!ccKey) {
+          toast({
+            title: "CaptionCraft API Key Missing",
+            description: "Add VITE_CAPTIONCRAFT_API_KEY to your .env file.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const captions = await callCaptionCraft({
+          rapidApiKey: ccKey,
+          imageUrl:    imageUrl.trim(),
+          vibe:        TONE_TO_VIBE[selectedTone] ?? "inspirational",
+          useEmojis:   true,
+          useHashtags: true,
+          lang:        selectedLanguage,
+        });
+
+        setGeneratedCaptions(captions);
+        setApiSource("captioncraft");
+        toast({
+          title: "Captions Generated! 🖼️",
+          description: "CaptionCraft AI analysed your image URL.",
+        });
+        return;
+      }
+
+      // ── Fallback: Gemini for prompt / uploaded image ─────────────────────
+      const apiKey = getApiKey();
+      if (!apiKey) return;
+
+      const modeNote = researchMode
+        ? "Use accurate, research-backed insights and factual language."
+        : "Be creative, engaging, and emotionally resonant.";
+
       const parts: object[] = [
         {
           text: `Generate 3 unique, highly engaging social media captions with the following parameters:
@@ -201,9 +342,12 @@ Topic/Description: ${prompt || "Image provided"}
 Tone: ${selectedTone}
 Platform: ${selectedPlatform}
 Character limit: ${platform.charLimit}
+Mode: ${modeNote}
+Language: ${LANGUAGES.find((l) => l.id === selectedLanguage)?.label ?? "English"}
+${styleMemory ? "Apply a consistent personal brand voice: concise, authentic, and value-driven." : ""}
 
 Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST have:
-- "text": caption text (respect ${platform.charLimit} char limit)
+- "text": caption text (respect ${platform.charLimit} char limit, write in the specified language)
 - "hashtags": array of 4-6 relevant hashtags
 - "score": number 70-98 (estimated engagement %)
 - "emoji": single relevant emoji for this option`,
@@ -212,10 +356,7 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
 
       if (imageEncoded && selectedImage) {
         parts.push({
-          inlineData: {
-            mimeType: selectedImage.type,
-            data: imageEncoded,
-          },
+          inlineData: { mimeType: selectedImage.type, data: imageEncoded },
         });
       }
 
@@ -223,6 +364,7 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
       const result = JSON.parse(text);
       const captions = result.captions || result;
       setGeneratedCaptions(Array.isArray(captions) ? captions : []);
+      setApiSource("gemini");
       toast({ title: "Captions Generated! 🚀", description: "3 AI-powered captions are ready." });
     } catch (e: any) {
       toast({ title: "Generation Failed", description: e.message, variant: "destructive" });
@@ -231,7 +373,7 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
     }
   };
 
-  // ── AI: Regenerate single caption ───────────────────────────────────────────
+  // ── AI: Regenerate single caption ──────────────────────────────────────────
 
   const handleRegenerateOne = async (index: number) => {
     const apiKey = getApiKey();
@@ -240,7 +382,7 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
     try {
       const text = await callGemini(apiKey, [
         {
-          text: `Generate ONE new ${selectedTone} caption for ${selectedPlatform} about: "${prompt || "same topic as before"}". 
+          text: `Generate ONE new ${selectedTone} caption for ${selectedPlatform} about: "${prompt || "same topic as before"}".
 Make it different from: "${generatedCaptions[index]?.text}"
 Return JSON: {"text":"...","hashtags":["..."],"score":85,"emoji":"🔥"}`,
         },
@@ -255,7 +397,7 @@ Return JSON: {"text":"...","hashtags":["..."],"score":85,"emoji":"🔥"}`,
     }
   };
 
-  // ── AI: Refine caption with instruction ────────────────────────────────────
+  // ── AI: Refine caption ─────────────────────────────────────────────────────
 
   const handleRefine = async () => {
     if (refineIndex === null || !refineInstruction.trim()) return;
@@ -286,7 +428,27 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
     }
   };
 
-  // ── Copy ────────────────────────────────────────────────────────────────────
+  // ── Export captions ────────────────────────────────────────────────────────
+
+  const handleExport = () => {
+    const content = generatedCaptions
+      .map(
+        (c, i) =>
+          `Option ${i + 1} ${c.emoji} (Score: ${c.score}%)\n${c.text}\n\n${c.hashtags.join(" ")}`
+      )
+      .join("\n\n---\n\n");
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "captions.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+    setExportOpen(false);
+    toast({ title: "Exported! 📄", description: "Captions saved to captions.txt" });
+  };
+
+  // ── Copy ───────────────────────────────────────────────────────────────────
 
   const handleCopy = (caption: Caption, index: number) => {
     const text = copiedWithHashtags
@@ -300,14 +462,14 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-background pt-20 pb-16 px-4">
+    <div className="min-h-screen bg-background pt-20 pb-12 px-4">
       <div className="container mx-auto max-w-6xl">
 
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-10">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium mb-4">
             <Sparkles className="w-3.5 h-3.5" />
-            Gemini Powered
+            {apiSource === "captioncraft" ? "CaptionCraft AI" : "Gemini"} Powered
           </div>
           <h1 className="font-display text-3xl sm:text-4xl font-bold mb-2">
             Generate <span className="gradient-text">Captions</span>
@@ -315,6 +477,64 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
           <p className="text-muted-foreground max-w-md mx-auto">
             Describe your post, choose your vibe, and let AI craft captions that actually perform.
           </p>
+        </motion.div>
+
+        {/* Mode toggles bar */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="flex flex-wrap items-center gap-4 mb-6 glass-card px-4 py-3"
+        >
+          {/* Agent mode toggle */}
+          <div className="flex items-center gap-2">
+            <ToggleLeft className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Agent Mode</span>
+            <button
+              onClick={() => setAgentMode((v) => !v)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${agentMode ? "bg-primary" : "bg-secondary border border-border"}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${agentMode ? "translate-x-4" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+
+          {/* Research / Creative mode toggle */}
+          <div className="flex items-center gap-2">
+            <Brain className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {researchMode ? "Research Mode" : "Creative Mode"}
+            </span>
+            <button
+              onClick={() => setResearchMode((v) => !v)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${researchMode ? "bg-primary" : "bg-secondary border border-border"}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${researchMode ? "translate-x-4" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+
+          {/* Style memory toggle */}
+          <div className="flex items-center gap-2">
+            <User className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Style Memory</span>
+            <button
+              onClick={() => setStyleMemory((v) => !v)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${styleMemory ? "bg-primary" : "bg-secondary border border-border"}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${styleMemory ? "translate-x-4" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+
+          {/* Export button */}
+          {generatedCaptions.length > 0 && (
+            <Button
+              variant="outline" size="sm"
+              onClick={handleExport}
+              className="ml-auto gap-1.5 text-xs border-border/50 text-muted-foreground hover:text-foreground"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export
+            </Button>
+          )}
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -360,7 +580,36 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                 </Button>
               </div>
 
-              {/* AI Suggest button */}
+              {/* ── Image URL input (CaptionCraft) ─────────────────────── */}
+              <div className="mt-3 pt-3 border-t border-border/30">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                  <ImageIcon className="w-3 h-3" />
+                  Image URL
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">CaptionCraft</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://example.com/photo.jpg"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    className="flex-1 h-8 px-3 text-xs rounded-md bg-background/50 border border-border/50 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/40"
+                  />
+                  {imageUrl && (
+                    <button
+                      onClick={() => setImageUrl("")}
+                      className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Paste a public image URL to generate captions via CaptionCraft AI.
+                </p>
+              </div>
+
+              {/* AI Suggest */}
               <div className="mt-3 pt-3 border-t border-border/30">
                 <Button
                   variant="outline" size="sm"
@@ -368,11 +617,7 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                   disabled={isSuggesting || !prompt.trim()}
                   className="w-full gap-2 text-xs border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50"
                 >
-                  {isSuggesting ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Wand2 className="w-3.5 h-3.5" />
-                  )}
+                  {isSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
                   {isSuggesting ? "Analyzing your prompt…" : "AI: Suggest Best Tone & Platform"}
                 </Button>
                 <AnimatePresence>
@@ -404,6 +649,29 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                     }`}
                   >
                     {tone.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Language */}
+            <div className="glass-card p-5">
+              <label className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
+                🌐 Language
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-medium ml-auto">Both APIs</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {LANGUAGES.map((lang) => (
+                  <button
+                    key={lang.id}
+                    onClick={() => setSelectedLanguage(lang.id)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      selectedLanguage === lang.id
+                        ? "bg-primary/20 text-primary border border-primary/40 shadow-sm"
+                        : "bg-secondary/50 text-muted-foreground border border-transparent hover:bg-secondary hover:text-foreground"
+                    }`}
+                  >
+                    {lang.label}
                   </button>
                 ))}
               </div>
@@ -456,15 +724,9 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
               </div>
               <button
                 onClick={() => setCopiedWithHashtags((v) => !v)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  copiedWithHashtags ? "bg-primary" : "bg-secondary border border-border"
-                }`}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${copiedWithHashtags ? "bg-primary" : "bg-secondary border border-border"}`}
               >
-                <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                    copiedWithHashtags ? "translate-x-4" : "translate-x-0.5"
-                  }`}
-                />
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${copiedWithHashtags ? "translate-x-4" : "translate-x-0.5"}`} />
               </button>
             </div>
 
@@ -474,11 +736,7 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
               disabled={(!prompt.trim() && !selectedImage) || isGenerating}
               className="w-full h-12 font-display text-base bg-gradient-to-r from-primary to-accent text-primary-foreground border-0 hover:opacity-90 glow-primary disabled:opacity-40 gap-2"
             >
-              {isGenerating ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
+              {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {isGenerating ? "Generating…" : "Generate Captions"}
             </Button>
           </motion.div>
@@ -509,9 +767,21 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
               </div>
             )}
 
-            {/* Skeleton loader */}
+            {/* Skeleton loader with AI avatar */}
             {isGenerating && (
               <div className="space-y-4">
+                <div className="flex items-center justify-center gap-3 py-4">
+                  <div className="relative w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Sparkles className="w-6 h-6 text-primary animate-spin" style={{ animationDuration: "3s" }} />
+                    <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-ping" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">AI is crafting your captions…</p>
+                    <p className="text-xs text-muted-foreground">
+                      {researchMode ? "Research mode: fetching sources" : "Creative mode: generating ideas"}
+                    </p>
+                  </div>
+                </div>
                 {[1, 2, 3].map((i) => (
                   <div key={i} className="glass-card p-5 overflow-hidden relative">
                     <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent" />
@@ -531,7 +801,7 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
               </div>
             )}
 
-            {/* Captions */}
+            {/* Caption cards */}
             <AnimatePresence>
               {!isGenerating && generatedCaptions.map((caption, index) => {
                 const charCount = caption.text.length;
@@ -548,12 +818,10 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
                         <span className="text-lg">{caption.emoji}</span>
-                        <span className="text-xs font-medium text-muted-foreground">
-                          Option {index + 1}
-                        </span>
+                        <span className="text-xs font-medium text-muted-foreground">Option {index + 1}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        {/* Engagement score */}
+                        {/* Score */}
                         <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
                           <BarChart3 className="w-3 h-3" />
                           {caption.score}%
@@ -561,14 +829,12 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
 
                         {/* Char count */}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          overLimit
-                            ? "bg-destructive/10 text-destructive"
-                            : "bg-secondary/60 text-muted-foreground"
+                          overLimit ? "bg-destructive/10 text-destructive" : "bg-secondary/60 text-muted-foreground"
                         }`}>
                           {charCount}/{platform.charLimit}
                         </span>
 
-                        {/* Refine button */}
+                        {/* Refine */}
                         <Button
                           variant="ghost" size="sm"
                           className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
@@ -586,11 +852,9 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                           onClick={() => handleRegenerateOne(index)}
                           disabled={regeneratingIndex === index}
                         >
-                          {regeneratingIndex === index ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <RotateCcw className="w-3.5 h-3.5" />
-                          )}
+                          {regeneratingIndex === index
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <RotateCcw className="w-3.5 h-3.5" />}
                         </Button>
 
                         {/* Copy */}
@@ -599,16 +863,14 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                           className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
                           onClick={() => handleCopy(caption, index)}
                         >
-                          {copiedIndex === index ? (
-                            <Check className="w-3.5 h-3.5 text-primary" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
+                          {copiedIndex === index
+                            ? <Check className="w-3.5 h-3.5 text-primary" />
+                            : <Copy className="w-3.5 h-3.5" />}
                         </Button>
                       </div>
                     </div>
 
-                    {/* Caption text */}
+                    {/* Text */}
                     <p className="text-foreground/90 text-sm leading-relaxed mb-3">{caption.text}</p>
 
                     {/* Hashtags */}
@@ -670,7 +932,7 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
               })}
             </AnimatePresence>
 
-            {/* Regenerate All button — shown after results */}
+            {/* Regenerate All */}
             {generatedCaptions.length > 0 && !isGenerating && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
                 <Button

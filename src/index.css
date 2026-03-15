@@ -102,7 +102,7 @@
   }
 
   .glass-card-hover {
-    @apply glass-card transition-all duration-300 hover:bg-card/80 hover:border-primary/30 hover:shadow-primary/10 hover:shadow-xl;
+    @apply glass-card transition-all duration-300 hover:bg-card/80 hover:border-primary/30 hover:shadow-primary/10 hover:shadow-xl hover:scale-[1.01];
   }
 
   .gradient-text {
@@ -123,6 +123,49 @@
 
   .glow-accent {
     box-shadow: 0 0 20px hsl(var(--accent) / 0.15), 0 0 60px hsl(var(--accent) / 0.05);
+  }
+
+  /* Confetti particle */
+  .confetti-particle {
+    position: fixed;
+    width: 8px;
+    height: 8px;
+    pointer-events: none;
+    z-index: 9999;
+    animation: confetti-fall 2s ease-in forwards;
+  }
+
+  /* Streaming cursor */
+  .streaming-cursor::after {
+    content: '|';
+    display: inline;
+    animation: blink-cursor 1s ease-in-out infinite;
+    color: hsl(var(--primary));
+    font-weight: 700;
+    margin-left: 1px;
+  }
+
+  /* Shimmer loading */
+  .shimmer-bg {
+    background: linear-gradient(90deg, hsl(var(--secondary)) 0%, hsl(var(--muted)) 50%, hsl(var(--secondary)) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* Node active glow */
+  .node-active {
+    animation: node-pulse 2s ease-in-out infinite;
+  }
+
+  /* Focus mode */
+  .focus-mode .navbar,
+  .focus-mode aside {
+    display: none !important;
+  }
+
+  /* Heatmap cell */
+  .heatmap-cell {
+    @apply w-3 h-3 rounded-sm transition-all duration-200;
   }
 }
 
