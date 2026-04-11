@@ -1,13 +1,13 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Sparkles, Copy, RefreshCw, BarChart3,
-  Check, Image as ImageIcon, Send, X, Wand2,
-  Lightbulb, ChevronRight, MessageSquarePlus,
-  RotateCcw, Info, TrendingUp, Clock, Users,
-  PenLine, Loader2, ToggleLeft, Brain, User,
+  Check, Image as ImageIcon, Send, X,
+  Info, TrendingUp, Clock, Users,
+  Loader2, ToggleLeft, Brain, User,
   Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -21,12 +21,6 @@ interface Caption {
   emoji: string;
 }
 
-interface AISuggestion {
-  tone: string;
-  platform: string;
-  reasoning: string;
-}
-
 interface PlatformTip {
   bestTime: string;
   audience: string;
@@ -37,6 +31,109 @@ interface PlatformTip {
 interface CaptionCraftItem {
   caption: string;
   hashtags?: string[];
+}
+
+interface GeminiModelInfo {
+  name?: string;
+  supportedGenerationMethods?: string[];
+}
+
+interface GeminiModelsResponse {
+  models?: GeminiModelInfo[];
+}
+
+interface GenerateLocationState {
+  templatePrompt?: string;
+}
+
+const OPTION_EMOJIS = ["\u2728", "\uD83D\uDD25", "\u2B50"];
+
+function normalizeHashtag(tag: string): string {
+  const t = tag.trim();
+  if (!t) return "";
+  return t.startsWith("#") ? t : `#${t}`;
+}
+
+/** Coerce API / model output into a clean Caption the UI can render. */
+function normalizeCaptionFromApi(raw: unknown, index: number): Caption | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const text = typeof o.text === "string" ? o.text.trim() : "";
+  if (!text) return null;
+
+  let hashtags: string[] = [];
+  if (Array.isArray(o.hashtags)) {
+    hashtags = o.hashtags
+      .filter((h): h is string => typeof h === "string")
+      .map(normalizeHashtag)
+      .filter(Boolean);
+  } else if (typeof o.hashtags === "string") {
+    hashtags = o.hashtags
+      .split(/[\s,]+/)
+      .map(normalizeHashtag)
+      .filter(Boolean);
+  }
+
+  let score = typeof o.score === "number" && !Number.isNaN(o.score) ? Math.round(o.score) : 82;
+  score = Math.min(98, Math.max(70, score));
+
+  const emoji =
+    typeof o.emoji === "string" && o.emoji.trim() ? o.emoji.trim().slice(0, 4) : OPTION_EMOJIS[index % OPTION_EMOJIS.length];
+
+  return { text, hashtags, score, emoji };
+}
+
+function normalizeCaptionsFromApi(rawList: unknown[]): Caption[] {
+  const out: Caption[] = [];
+  for (let i = 0; i < rawList.length && out.length < 3; i++) {
+    const c = normalizeCaptionFromApi(rawList[i], out.length);
+    if (c) out.push(c);
+  }
+  return out;
+}
+
+function parseGeminiJson<T>(rawText: string): T {
+  // 1) Try direct JSON first.
+  try {
+    return JSON.parse(rawText) as T;
+  } catch {
+    // Continue with extraction fallbacks.
+  }
+
+  // 2) Strip fenced code blocks like ```json ... ```
+  const fencedMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch?.[1]?.trim() ?? rawText.trim();
+
+  try {
+    return JSON.parse(candidate) as T;
+  } catch {
+    // Continue with object/array boundary extraction.
+  }
+
+  // 3) Extract likely JSON boundaries from mixed prose text.
+  const firstBrace = candidate.indexOf("{");
+  const lastBrace = candidate.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const objectSlice = candidate.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(objectSlice) as T;
+    } catch {
+      // continue
+    }
+  }
+
+  const firstBracket = candidate.indexOf("[");
+  const lastBracket = candidate.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    const arraySlice = candidate.slice(firstBracket, lastBracket + 1);
+    try {
+      return JSON.parse(arraySlice) as T;
+    } catch {
+      // continue
+    }
+  }
+
+  throw new Error("Model returned non-JSON output. Please retry.");
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -91,25 +188,76 @@ const PLATFORM_TIPS: Record<string, PlatformTip> = {
 // ─── Gemini helper ────────────────────────────────────────────────────────────
 
 async function callGemini(apiKey: string, parts: object[]): Promise<string> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: { responseMimeType: "application/json" },
-      }),
+  // Discover models that support generateContent for this API key,
+  // then prioritize non-2.0 models to avoid current quota issues.
+  const preferredModelOrder = [
+    "models/gemini-1.5-flash-latest",
+    "models/gemini-1.5-pro-latest",
+    "models/gemini-1.5-flash",
+    "models/gemini-1.5-pro",
+    "models/gemini-2.0-flash",
+  ];
+
+  const fallbackCandidates = [
+    ...preferredModelOrder,
+    "models/gemini-2.0-flash-lite",
+    "models/gemini-2.0-flash-exp",
+  ];
+
+  let discoveredCandidates: string[] = [];
+  try {
+    const listRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+    );
+    if (listRes.ok) {
+      const listData: GeminiModelsResponse = await listRes.json();
+      const compatible = (listData?.models ?? [])
+        .filter(
+          (m) =>
+            m?.name &&
+            Array.isArray(m?.supportedGenerationMethods) &&
+            m.supportedGenerationMethods.includes("generateContent")
+        )
+        .map((m) => m.name as string);
+
+      const preferred = preferredModelOrder.filter((m) => compatible.includes(m));
+      const others = compatible.filter((m: string) => !preferred.includes(m));
+      discoveredCandidates = [...preferred, ...others];
     }
-  );
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error?.message || "Gemini request failed");
+  } catch {
+    // Ignore listing failures and use static fallbacks below.
   }
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("No content received from Gemini");
-  return text;
+
+  const modelCandidates = discoveredCandidates.length > 0 ? discoveredCandidates : fallbackCandidates;
+  let lastError = "Gemini request failed";
+
+  for (const modelName of modelCandidates) {
+    const modelPath = modelName.startsWith("models/") ? modelName : `models/${modelName}`;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { responseMimeType: "application/json" },
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      lastError = err?.error?.message || `Gemini request failed for ${modelPath}`;
+      continue;
+    }
+
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (text) return text;
+    lastError = `No content received from ${modelPath}`;
+  }
+
+  throw new Error(lastError);
 }
 
 // ─── CaptionCraft API helper ───────────────────────────────────────────────────
@@ -178,6 +326,9 @@ async function callCaptionCraft({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const GeneratePage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   // Core state
   const [prompt, setPrompt]                     = useState("");
   const [selectedTone, setSelectedTone]         = useState("aesthetic");
@@ -193,14 +344,6 @@ const GeneratePage = () => {
   const [imageEncoded, setImageEncoded]     = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // AI feature state
-  const [aiSuggestion, setAiSuggestion]         = useState<AISuggestion | null>(null);
-  const [isSuggesting, setIsSuggesting]         = useState(false);
-  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
-  const [refineIndex, setRefineIndex]           = useState<number | null>(null);
-  const [refineInstruction, setRefineInstruction] = useState("");
-  const [isRefining, setIsRefining]             = useState(false);
-
   // CaptionCraft-specific state
   const [imageUrl, setImageUrl]         = useState("");
   const [selectedLanguage, setSelectedLanguage] = useState("en");
@@ -213,9 +356,18 @@ const GeneratePage = () => {
   const [exportOpen, setExportOpen]   = useState(false);
 
   const { toast } = useToast();
+  const templatePrompt = (location.state as GenerateLocationState | null)?.templatePrompt;
 
   const platform    = PLATFORMS.find((p) => p.id === selectedPlatform)!;
   const platformTip = PLATFORM_TIPS[selectedPlatform];
+
+  useEffect(() => {
+    if (!templatePrompt) return;
+    setPrompt(templatePrompt);
+
+    // Clear transient route state so refresh/back doesn't re-apply unintentionally.
+    navigate(location.pathname, { replace: true, state: null });
+  }, [templatePrompt, navigate, location.pathname]);
 
   // ── API key helper ─────────────────────────────────────────────────────────
 
@@ -256,39 +408,6 @@ const GeneratePage = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // ── AI: Suggest tone & platform ────────────────────────────────────────────
-
-  const handleAISuggest = async () => {
-    if (!prompt.trim()) {
-      toast({ title: "Write something first", description: "Enter a description so AI can suggest settings.", variant: "destructive" });
-      return;
-    }
-    const apiKey = getApiKey();
-    if (!apiKey) return;
-
-    setIsSuggesting(true);
-    setAiSuggestion(null);
-    try {
-      const text = await callGemini(apiKey, [
-        {
-          text: `Analyze this social media post description and suggest the BEST tone and platform for maximum engagement.
-Description: "${prompt}"
-
-Return JSON with keys: "tone" (one of: funny, aesthetic, professional, bold, minimalist, emotional, witty, motivational), "platform" (one of: instagram, linkedin, twitter, whatsapp), "reasoning" (one short sentence explaining why).`,
-        },
-      ]);
-      const suggestion = JSON.parse(text);
-      setAiSuggestion(suggestion);
-      if (suggestion.tone) setSelectedTone(suggestion.tone);
-      if (suggestion.platform) setSelectedPlatform(suggestion.platform);
-      toast({ title: "AI Settings Applied ✨", description: suggestion.reasoning || "Tone & platform updated." });
-    } catch (e: any) {
-      toast({ title: "Suggestion Failed", description: e.message, variant: "destructive" });
-    } finally {
-      setIsSuggesting(false);
-    }
-  };
-
   // ── AI: Generate all captions ──────────────────────────────────────────────
 
   const handleGenerate = async () => {
@@ -318,7 +437,7 @@ Return JSON with keys: "tone" (one of: funny, aesthetic, professional, bold, min
           lang:        selectedLanguage,
         });
 
-        setGeneratedCaptions(captions);
+        setGeneratedCaptions(normalizeCaptionsFromApi(captions as unknown[]));
         setApiSource("captioncraft");
         toast({
           title: "Captions Generated! 🖼️",
@@ -361,70 +480,28 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
       }
 
       const text = await callGemini(apiKey, parts);
-      const result = JSON.parse(text);
-      const captions = result.captions || result;
-      setGeneratedCaptions(Array.isArray(captions) ? captions : []);
+      const result = parseGeminiJson<{ captions?: unknown[] } | unknown[]>(text);
+      const rawCaptions = Array.isArray(result)
+        ? result
+        : ((result as { captions?: unknown[] }).captions ?? []);
+      const captions = normalizeCaptionsFromApi(rawCaptions);
+      if (captions.length === 0) {
+        throw new Error("Could not parse captions from the model. Please try again.");
+      }
+      setGeneratedCaptions(captions);
       setApiSource("gemini");
-      toast({ title: "Captions Generated! 🚀", description: "3 AI-powered captions are ready." });
-    } catch (e: any) {
-      toast({ title: "Generation Failed", description: e.message, variant: "destructive" });
+      toast({
+        title: "Captions Generated!",
+        description:
+          captions.length >= 3
+            ? "3 AI-powered captions are ready."
+            : `${captions.length} caption${captions.length === 1 ? "" : "s"} ready. Try Regenerate for more variations.`,
+      });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Unknown error while generating captions";
+      toast({ title: "Generation Failed", description: message, variant: "destructive" });
     } finally {
       setIsGenerating(false);
-    }
-  };
-
-  // ── AI: Regenerate single caption ──────────────────────────────────────────
-
-  const handleRegenerateOne = async (index: number) => {
-    const apiKey = getApiKey();
-    if (!apiKey) return;
-    setRegeneratingIndex(index);
-    try {
-      const text = await callGemini(apiKey, [
-        {
-          text: `Generate ONE new ${selectedTone} caption for ${selectedPlatform} about: "${prompt || "same topic as before"}".
-Make it different from: "${generatedCaptions[index]?.text}"
-Return JSON: {"text":"...","hashtags":["..."],"score":85,"emoji":"🔥"}`,
-        },
-      ]);
-      const newCaption: Caption = JSON.parse(text);
-      setGeneratedCaptions((prev) => prev.map((c, i) => (i === index ? { ...c, ...newCaption } : c)));
-      toast({ title: "Caption Refreshed ✨" });
-    } catch (e: any) {
-      toast({ title: "Failed", description: e.message, variant: "destructive" });
-    } finally {
-      setRegeneratingIndex(null);
-    }
-  };
-
-  // ── AI: Refine caption ─────────────────────────────────────────────────────
-
-  const handleRefine = async () => {
-    if (refineIndex === null || !refineInstruction.trim()) return;
-    const apiKey = getApiKey();
-    if (!apiKey) return;
-    setIsRefining(true);
-    try {
-      const original = generatedCaptions[refineIndex];
-      const text = await callGemini(apiKey, [
-        {
-          text: `Refine this social media caption based on the instruction below.
-Original: "${original.text}"
-Instruction: "${refineInstruction}"
-Platform: ${selectedPlatform}, Tone: ${selectedTone}
-
-Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":"${original.emoji}"}`,
-        },
-      ]);
-      const refined: Caption = JSON.parse(text);
-      setGeneratedCaptions((prev) => prev.map((c, i) => (i === refineIndex ? { ...c, ...refined } : c)));
-      toast({ title: "Caption Refined! ✨" });
-      setRefineIndex(null);
-      setRefineInstruction("");
-    } catch (e: any) {
-      toast({ title: "Refinement Failed", description: e.message, variant: "destructive" });
-    } finally {
-      setIsRefining(false);
     }
   };
 
@@ -609,29 +686,6 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                 </p>
               </div>
 
-              {/* AI Suggest */}
-              <div className="mt-3 pt-3 border-t border-border/30">
-                <Button
-                  variant="outline" size="sm"
-                  onClick={handleAISuggest}
-                  disabled={isSuggesting || !prompt.trim()}
-                  className="w-full gap-2 text-xs border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50"
-                >
-                  {isSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
-                  {isSuggesting ? "Analyzing your prompt…" : "AI: Suggest Best Tone & Platform"}
-                </Button>
-                <AnimatePresence>
-                  {aiSuggestion && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                      className="mt-2 p-3 rounded-lg bg-primary/5 border border-primary/15 text-xs text-muted-foreground flex gap-2 items-start"
-                    >
-                      <Lightbulb className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
-                      <span>{aiSuggestion.reasoning}</span>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
             </div>
 
             {/* Tone */}
@@ -733,7 +787,10 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
             {/* Generate Button */}
             <Button
               onClick={handleGenerate}
-              disabled={(!prompt.trim() && !selectedImage) || isGenerating}
+              disabled={
+                (!prompt.trim() && !selectedImage && !imageUrl.trim().startsWith("http")) ||
+                isGenerating
+              }
               className="w-full h-12 font-display text-base bg-gradient-to-r from-primary to-accent text-primary-foreground border-0 hover:opacity-90 glow-primary disabled:opacity-40 gap-2"
             >
               {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -744,7 +801,7 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
           {/* ── RIGHT PANEL ────────────────────────────────────────────────── */}
           <motion.div
             initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}
-            className="lg:col-span-3 space-y-4"
+            className="lg:col-span-3 space-y-6"
           >
             {/* Empty state */}
             {generatedCaptions.length === 0 && !isGenerating && (
@@ -807,18 +864,23 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                 const charCount = caption.text.length;
                 const overLimit = charCount > platform.charLimit;
                 return (
-                  <motion.div
-                    key={index}
+                  <motion.article
+                    key={`caption-${index}-${caption.text.slice(0, 24)}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.08 }}
-                    className="glass-card-hover p-5"
+                    className="glass-card-hover p-5 scroll-mt-24"
+                    aria-label={`Caption option ${index + 1}`}
                   >
                     {/* Card header */}
                     <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{caption.emoji}</span>
-                        <span className="text-xs font-medium text-muted-foreground">Option {index + 1}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-lg shrink-0" aria-hidden>
+                          {caption.emoji}
+                        </span>
+                        <h3 className="text-xs font-semibold text-muted-foreground truncate">
+                          Option {index + 1}
+                        </h3>
                       </div>
                       <div className="flex items-center gap-1.5">
                         {/* Score */}
@@ -834,34 +896,12 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                           {charCount}/{platform.charLimit}
                         </span>
 
-                        {/* Refine */}
-                        <Button
-                          variant="ghost" size="sm"
-                          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                          title="Refine with instruction"
-                          onClick={() => { setRefineIndex(index); setRefineInstruction(""); }}
-                        >
-                          <PenLine className="w-3.5 h-3.5" />
-                        </Button>
-
-                        {/* Regenerate single */}
-                        <Button
-                          variant="ghost" size="sm"
-                          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                          title="Regenerate this caption"
-                          onClick={() => handleRegenerateOne(index)}
-                          disabled={regeneratingIndex === index}
-                        >
-                          {regeneratingIndex === index
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <RotateCcw className="w-3.5 h-3.5" />}
-                        </Button>
-
                         {/* Copy */}
                         <Button
                           variant="ghost" size="sm"
                           className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
                           onClick={() => handleCopy(caption, index)}
+                          aria-label={`Copy caption ${index + 1}`}
                         >
                           {copiedIndex === index
                             ? <Check className="w-3.5 h-3.5 text-primary" />
@@ -871,63 +911,27 @@ Return JSON: {"text":"...","hashtags":["..."],"score":${original.score},"emoji":
                     </div>
 
                     {/* Text */}
-                    <p className="text-foreground/90 text-sm leading-relaxed mb-3">{caption.text}</p>
+                    <p className="text-foreground/90 text-sm leading-relaxed mb-3 whitespace-pre-wrap break-words">
+                      {caption.text}
+                    </p>
 
                     {/* Hashtags */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {caption.hashtags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="text-xs text-primary/70 font-medium px-2 py-0.5 rounded-full bg-primary/5 border border-primary/10 cursor-pointer hover:bg-primary/10 transition-colors"
-                          onClick={() => navigator.clipboard.writeText(tag)}
-                          title="Click to copy hashtag"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
+                    {caption.hashtags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {caption.hashtags.map((tag, ti) => (
+                          <span
+                            key={`${index}-${ti}-${tag}`}
+                            className="text-xs text-primary/70 font-medium px-2 py-0.5 rounded-full bg-primary/5 border border-primary/10 cursor-pointer hover:bg-primary/10 transition-colors"
+                            onClick={() => navigator.clipboard.writeText(tag)}
+                            title="Click to copy hashtag"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
-                    {/* Refine panel */}
-                    <AnimatePresence>
-                      {refineIndex === index && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mt-4 pt-4 border-t border-border/40"
-                        >
-                          <p className="text-xs font-medium text-foreground mb-2 flex items-center gap-1.5">
-                            <MessageSquarePlus className="w-3.5 h-3.5 text-primary" />
-                            Refine this caption
-                          </p>
-                          <Textarea
-                            placeholder='e.g., "Make it shorter", "Add more humor", "Remove the emoji"…'
-                            value={refineInstruction}
-                            onChange={(e) => setRefineInstruction(e.target.value)}
-                            className="min-h-[70px] text-xs bg-background/50 border-border/50 resize-none focus:border-primary/40"
-                          />
-                          <div className="flex gap-2 mt-2">
-                            <Button
-                              size="sm"
-                              onClick={handleRefine}
-                              disabled={!refineInstruction.trim() || isRefining}
-                              className="text-xs h-8 gap-1.5 bg-primary text-primary-foreground hover:opacity-90"
-                            >
-                              {isRefining ? <Loader2 className="w-3 h-3 animate-spin" /> : <ChevronRight className="w-3 h-3" />}
-                              {isRefining ? "Refining…" : "Apply"}
-                            </Button>
-                            <Button
-                              size="sm" variant="ghost"
-                              onClick={() => setRefineIndex(null)}
-                              className="text-xs h-8 text-muted-foreground"
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
+                  </motion.article>
                 );
               })}
             </AnimatePresence>

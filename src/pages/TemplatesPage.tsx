@@ -91,8 +91,12 @@ const TemplatesPage = () => {
     setSaved(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
   };
 
-  const useTemplate = (template: typeof templates[0]) => {
-    navigate("/generate");
+  const applyTemplate = (template: typeof templates[0]) => {
+    navigate("/generate", {
+      state: {
+        templatePrompt: template.prompt,
+      },
+    });
   };
 
   return (
@@ -224,7 +228,7 @@ const TemplatesPage = () => {
               {/* Actions */}
               <div className="flex gap-2">
                 <Button
-                  onClick={() => useTemplate(template)}
+                  onClick={() => applyTemplate(template)}
                   size="sm"
                   className="flex-1 h-8 text-xs bg-gradient-to-r from-primary to-accent text-primary-foreground border-0 hover:opacity-90"
                 >

@@ -5,13 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import ThemeToggle from "./ThemeToggle";
 import capsyncLogo from "@/assets/capsync-logo.png";
-import { Menu, X, Sparkles, Type, LayoutTemplate, BarChart3, Brain } from "lucide-react";
+import { Menu, X, Sparkles, Type, LayoutTemplate, Brain } from "lucide-react";
 
 const navLinks = [
   { to: "/generate", label: "Generate", icon: Sparkles },
   { to: "/editor", label: "Editor", icon: Type },
   { to: "/templates", label: "Templates", icon: LayoutTemplate },
-  { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
 ];
 
 const Navbar = () => {
