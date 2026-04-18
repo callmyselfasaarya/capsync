@@ -96,9 +96,11 @@ const Index = () => {
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
-            <Button variant="outline" size="lg" className="font-display text-base px-8 h-12 border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40">
-              See Examples
-            </Button>
+            <Link to="/examples">
+              <Button variant="outline" size="lg" className="font-display text-base px-8 h-12 border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40">
+                See Examples
+              </Button>
+            </Link>
           </div>
 
           {/* Floating preview card */}

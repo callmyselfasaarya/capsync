@@ -11,6 +11,10 @@ import {
   Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import PersonaSelector from "@/components/PersonaSelector";
+import AgentMode from "@/components/AgentMode";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +23,7 @@ interface Caption {
   hashtags: string[];
   score: number;
   emoji: string;
+  advice?: string; // Add advice field for contextual questions
 }
 
 interface PlatformTip {
@@ -355,6 +360,12 @@ const GeneratePage = () => {
   const [styleMemory, setStyleMemory] = useState(false);
   const [exportOpen, setExportOpen]   = useState(false);
 
+  // New Context Context
+  const [selectedPersona, setSelectedPersona] = useState("startup");
+  const [targetAudience, setTargetAudience]   = useState("");
+  const [marketingGoal, setMarketingGoal]     = useState("");
+  const [expertAdvice, setExpertAdvice]       = useState<string | null>(null);
+
   const { toast } = useToast();
   const templatePrompt = (location.state as GenerateLocationState | null)?.templatePrompt;
 
@@ -456,8 +467,13 @@ const GeneratePage = () => {
 
       const parts: object[] = [
         {
-          text: `Generate 3 unique, highly engaging social media captions with the following parameters:
+          text: `You are a Senior Social Media Marketing Strategist & Creative Copywriter.
+Generate 3 unique, highly engaging social media captions with the following parameters:
+
 Topic/Description: ${prompt || "Image provided"}
+Persona: ${selectedPersona}
+Target Audience: ${targetAudience || "General social media users"}
+Marketing Goal: ${marketingGoal || "General engagement"}
 Tone: ${selectedTone}
 Platform: ${selectedPlatform}
 Character limit: ${platform.charLimit}
@@ -465,11 +481,15 @@ Mode: ${modeNote}
 Language: ${LANGUAGES.find((l) => l.id === selectedLanguage)?.label ?? "English"}
 ${styleMemory ? "Apply a consistent personal brand voice: concise, authentic, and value-driven." : ""}
 
-Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST have:
-- "text": caption text (respect ${platform.charLimit} char limit, write in the specified language)
-- "hashtags": array of 4-6 relevant hashtags
-- "score": number 70-98 (estimated engagement %)
-- "emoji": single relevant emoji for this option`,
+If the user's prompt contains a question or seeks strategy, provide a brief (1-2 sentences) "expert_advice" field in the JSON before the captions.
+
+Return ONLY a JSON object with:
+- "expert_advice": (Optional) brief strategic advice if the user asked a question or if agent mode is enabled.
+- "captions": array of 3 objects. Each object MUST have:
+  - "text": caption text (respect ${platform.charLimit} char limit, write in the specified language)
+  - "hashtags": array of 4-6 relevant hashtags
+  - "score": number 70-98 (estimated engagement %)
+  - "emoji": single relevant emoji for this option`,
         },
       ];
 
@@ -480,10 +500,20 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
       }
 
       const text = await callGemini(apiKey, parts);
-      const result = parseGeminiJson<{ captions?: unknown[] } | unknown[]>(text);
-      const rawCaptions = Array.isArray(result)
-        ? result
-        : ((result as { captions?: unknown[] }).captions ?? []);
+      const result = parseGeminiJson<{ expert_advice?: string; captions?: unknown[] } | unknown[]>(text);
+      
+      let rawCaptions: unknown[] = [];
+      if (Array.isArray(result)) {
+        rawCaptions = result;
+      } else {
+        rawCaptions = result.captions ?? [];
+        if (result.expert_advice) {
+          setExpertAdvice(result.expert_advice);
+        } else {
+          setExpertAdvice(null);
+        }
+      }
+
       const captions = normalizeCaptionsFromApi(rawCaptions);
       if (captions.length === 0) {
         throw new Error("Could not parse captions from the model. Please try again.");
@@ -647,6 +677,17 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
                     </button>
                   </div>
                 )}
+                
+                {/* Agent Mode Section */}
+                {agentMode && (
+                  <div className="mt-4 mb-2">
+                    <AgentMode onComplete={(task) => {
+                      setPrompt(task);
+                      handleGenerate();
+                    }} />
+                  </div>
+                )}
+
                 <Button
                   variant="outline" size="sm"
                   onClick={() => fileInputRef.current?.click()}
@@ -686,6 +727,35 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
                 </p>
               </div>
 
+            </div>
+
+            {/* Persona and Context */}
+            <div className="space-y-4">
+              <PersonaSelector value={selectedPersona} onChange={setSelectedPersona} />
+              
+              <div className="glass-card p-5 space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="audience" className="text-xs font-medium text-foreground">Target Audience</Label>
+                  <Input 
+                    id="audience"
+                    placeholder="e.g., Small business owners, Gen Z travelers..." 
+                    value={targetAudience}
+                    onChange={(e) => setTargetAudience(e.target.value)}
+                    className="h-8 text-xs bg-background/50 border-border/50 placeholder:text-muted-foreground/40"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="goal" className="text-xs font-medium text-foreground">Marketing Goal</Label>
+                  <Input 
+                    id="goal"
+                    placeholder="e.g., Drive traffic, Increase likes, Build trust..." 
+                    value={marketingGoal}
+                    onChange={(e) => setMarketingGoal(e.target.value)}
+                    className="h-8 text-xs bg-background/50 border-border/50 placeholder:text-muted-foreground/40"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Tone */}
@@ -856,6 +926,23 @@ Return ONLY a JSON object with a 'captions' array of 3 objects. Each object MUST
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* Expert Advice Section */}
+            {expertAdvice && !isGenerating && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="glass-card p-5 border-primary/20 bg-primary/5"
+              >
+                <div className="flex items-center gap-2 mb-2 text-primary">
+                  <Brain className="w-4 h-4" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Strategic Insight</span>
+                </div>
+                <p className="text-sm text-foreground/90 leading-relaxed">
+                  {expertAdvice}
+                </p>
+              </motion.div>
             )}
 
             {/* Caption cards */}
