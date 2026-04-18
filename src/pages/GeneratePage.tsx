@@ -681,10 +681,22 @@ Return ONLY a JSON object with:
                 {/* Agent Mode Section */}
                 {agentMode && (
                   <div className="mt-4 mb-2">
-                    <AgentMode onComplete={(task) => {
-                      setPrompt(task);
-                      handleGenerate();
-                    }} />
+                    <AgentMode
+                      context={{
+                        platformLabel: platform.label,
+                        toneLabel: TONES.find((t) => t.id === selectedTone)?.label ?? selectedTone,
+                        personaLabel: selectedPersona,
+                        targetAudience,
+                        marketingGoal,
+                        languageLabel: LANGUAGES.find((l) => l.id === selectedLanguage)?.label ?? selectedLanguage,
+                        hasImage: Boolean(selectedImage || imageUrl.trim().startsWith("http")),
+                        promptSeed: prompt,
+                      }}
+                      onComplete={(task) => {
+                        setPrompt(task);
+                        handleGenerate();
+                      }}
+                    />
                   </div>
                 )}
 
