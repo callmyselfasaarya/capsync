@@ -1,4 +1,4 @@
-# CapSync 🚀
+# CapSync
 
 CapSync is a quick and lightweight synchronization application designed to synchronize any data from the clipboard or file across multiple devices efficiently. It offers a user-friendly interface with a high level of performance for both developers and everyday users.
 
