@@ -1,7 +1,8 @@
+
 <<<<<<< HEAD
 # ⚡ CapSync: AI-Powered Caption Engine
 
-![CapSync Banner](https://images.unsplash.com/photo-1611162617474-5b21e879e113?auto=format&fit=crop&q=80&w=1000)
+<img width="2000" height="1125" alt="Capsync" src="https://github.com/user-attachments/assets/5b8f3219-64e2-4469-898b-fd52bb6dbccc" />
 
 **CapSync** is a premium AI-powered social media caption generator designed for creators who want to stop the scroll. By leveraging advanced Large Language Models (LLMs), CapSync transforms your ideas or images into high-converting, platform-optimized captions in seconds.
 
