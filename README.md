@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # ⚡ CapSync: AI-Powered Caption Engine
 
 ![CapSync Banner](https://images.unsplash.com/photo-1611162617474-5b21e879e113?auto=format&fit=crop&q=80&w=1000)
@@ -54,7 +53,7 @@
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/capsync.git
+   git clone https://github.com/callmyselfasaarya/capsync.git
    cd capsync
    ```
 
@@ -85,6 +84,20 @@
 
 ---
 
+## ⚡ Performance Optimizations
+
+CapSync features advanced build-time optimizations to ensure fast loading and optimal performance:
+
+- **Code Splitting (Manual Chunks)**:
+  - `react-vendor`: Core React dependencies (`react`, `react-dom`, `react-router-dom`)
+  - `ui-vendor`: Shadcn UI primitives, Radix UI, Lucide icons, and Tailwind merge utilities
+  - `motion-vendor`: Framer Motion animations
+  - `chart-vendor`: Recharts visualization library
+  - This custom Vite configuration keeps chunk sizes well below the 500 kB limit and prevents circular dependency warnings during the build process.
+- **Browserslist Configuration**: Uses an updated `caniuse-lite` database for precise and efficient CSS/JS polyfills (`npx update-browserslist-db@latest`).
+
+---
+
 ## 📁 Project Structure
 
 ```text
@@ -102,62 +115,11 @@ src/
 
 ---
 
-## 📄 License
-
-Built with ❤️ for creators. © 2026 CapSync.
-=======
-# CapSync
-
-CapSync is a quick and lightweight synchronization application designed to synchronize any data from the clipboard or file across multiple devices efficiently. It offers a user-friendly interface with a high level of performance for both developers and everyday users.
-
-## ✨ Features
-
-- Real-time synchronization
-- Efficient performance and lightweight nature
-- Compatible with various platforms
-- Data security while transferring
-- Easy setup and configuration process
-
-## 📦 Installation
-
-```bash
-git clone https://github.com/callmyselfasaarya/capsync.git
-cd capsync
-npm install
-```
-
-## 🚀 Usage
-
-Run the application:
-
-```bash
-npm start
-```
-
-## 📂 Project Structure
-
-```bash
-capsync/
-│── src/
-│── config/
-│── tests/
-│── README.md
-```
-
-## 🤝 Contributing
-
-Any contributions are welcome. Fork the repo, checkout a new branch and create a pull request.
-
-## 📄 License
-
-Licensed under the MIT License
-
 ## 👨‍💻 Author
 
 Created by **Aarya**  
 GitHub: https://github.com/callmyselfasaarya
 
-## ⭐ Support
+## 📄 License
 
-Please show your support for this project with a ⭐.
->>>>>>> 904b3ab7b79aded8dcd511ab3974aa9d2dc4eecb
+Built with ❤️ for creators. © 2026 CapSync. Licensed under the MIT License.
