@@ -28,7 +28,7 @@ const Navbar = () => {
       <div className="container mx-auto flex items-center justify-between h-16 px-4">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 group flex-shrink-0">
-          <img src={capsyncLogo} alt="CapSync logo" className="w-8 h-8 rounded-lg object-contain" />
+          <img src={capsyncLogo} alt="CapSync logo" width="32" height="32" loading="eager" decoding="async" className="w-8 h-8 rounded-lg object-contain" />
           <span className="font-display font-bold text-lg text-foreground">
             Cap<span className="gradient-text">Sync</span>
           </span>
@@ -85,7 +85,7 @@ const Navbar = () => {
             </SheetTrigger>
             <SheetContent side="right" className="w-72 bg-card border-border/50 p-6">
               <div className="flex items-center gap-2 mb-8">
-                <img src={capsyncLogo} alt="CapSync" className="w-7 h-7 rounded object-contain" />
+                <img src={capsyncLogo} alt="CapSync" width="28" height="28" loading="lazy" decoding="async" className="w-7 h-7 rounded object-contain" />
                 <span className="font-display font-bold text-foreground">Cap<span className="gradient-text">Sync</span></span>
                 <button onClick={() => setMobileOpen(false)} className="ml-auto text-muted-foreground hover:text-foreground">
                   <X className="w-4 h-4" />

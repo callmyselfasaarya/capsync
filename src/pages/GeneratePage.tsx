@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,10 +11,11 @@ import {
   Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import PersonaSelector from "@/components/PersonaSelector";
-import AgentMode from "@/components/AgentMode";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+const PersonaSelector = lazy(() => import("@/components/PersonaSelector"));
+const AgentMode = lazy(() => import("@/components/AgentMode"));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -681,22 +682,24 @@ Return ONLY a JSON object with:
                 {/* Agent Mode Section */}
                 {agentMode && (
                   <div className="mt-4 mb-2">
-                    <AgentMode
-                      context={{
-                        platformLabel: platform.label,
-                        toneLabel: TONES.find((t) => t.id === selectedTone)?.label ?? selectedTone,
-                        personaLabel: selectedPersona,
-                        targetAudience,
-                        marketingGoal,
-                        languageLabel: LANGUAGES.find((l) => l.id === selectedLanguage)?.label ?? selectedLanguage,
-                        hasImage: Boolean(selectedImage || imageUrl.trim().startsWith("http")),
-                        promptSeed: prompt,
-                      }}
-                      onComplete={(task) => {
-                        setPrompt(task);
-                        handleGenerate();
-                      }}
-                    />
+                    <Suspense fallback={<div className="p-4 text-center text-xs text-muted-foreground animate-pulse">Loading Agent Studio...</div>}>
+                      <AgentMode
+                        context={{
+                          platformLabel: platform.label,
+                          toneLabel: TONES.find((t) => t.id === selectedTone)?.label ?? selectedTone,
+                          personaLabel: selectedPersona,
+                          targetAudience,
+                          marketingGoal,
+                          languageLabel: LANGUAGES.find((l) => l.id === selectedLanguage)?.label ?? selectedLanguage,
+                          hasImage: Boolean(selectedImage || imageUrl.trim().startsWith("http")),
+                          promptSeed: prompt,
+                        }}
+                        onComplete={(task) => {
+                          setPrompt(task);
+                          handleGenerate();
+                        }}
+                      />
+                    </Suspense>
                   </div>
                 )}
 
@@ -743,7 +746,9 @@ Return ONLY a JSON object with:
 
             {/* Persona and Context */}
             <div className="space-y-4">
-              <PersonaSelector value={selectedPersona} onChange={setSelectedPersona} />
+              <Suspense fallback={<div className="glass-card p-4 text-center text-xs text-muted-foreground animate-pulse">Loading Persona Options...</div>}>
+                <PersonaSelector value={selectedPersona} onChange={setSelectedPersona} />
+              </Suspense>
               
               <div className="glass-card p-5 space-y-4">
                 <div className="space-y-2">
